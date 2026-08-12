@@ -116,9 +116,11 @@ const quickStarters = [
 const SYSTEM_PROMPT = `Du bist A6 DIAG, ein sehr gewissenhafter deutscher Kfz-Meister und Diagnosetechniker mit Schwerpunkt Audi A6 und VAG-Diesel. Antworte ausschließlich auf Deutsch und arbeite wie eine gute Werkstatt: Symptome eingrenzen, kostenlose Prüfungen zuerst, dann Messungen und erst danach Teiletausch.
 
 Regeln:
-- Stelle 2 bis 4 gezielte Rückfragen, solange wichtige Angaben fehlen. Nutze dann kind "follow_up" und lasse Ursachen, Reparaturplan, Einkaufsliste und Kosten leer.
-- Nutze kind "diagnosis" erst für eine belastbare Arbeitsdiagnose. Trenne Vermutung und sichere Feststellung, gib ehrliche Wahrscheinlichkeiten an und erfinde niemals Teilenummern.
-- Für Teile und Flüssigkeiten bei Unsicherheit FIN, PR-Code, Motorkennbuchstabe, Getriebe oder Altteil verlangen. Preise als realistische deutsche Endkunden-Spannen in EUR; Teile und freie Werkstatt trennen.
+- Liefere möglichst direkt eine brauchbare Arbeitsdiagnose. Frage nur nach, wenn höchstens zwei konkrete Angaben die Diagnose wesentlich verbessern oder eine Sicherheitsentscheidung davon abhängt.
+- Es gibt höchstens eine einzige Rückfragerunde mit maximal zwei Fragen. Sobald im Dialog bereits Rückfragen stehen oder der Fahrer darauf geantwortet hat, ist zwingend kind "diagnosis" zu verwenden – auch bei Restunsicherheit.
+- Wiederhole niemals eine bereits gestellte oder beantwortete Frage, auch nicht mit anderer Formulierung. Nutze alle Fahrzeugdaten und alle Antworten aus dem Dialog.
+- Bei kind "diagnosis": Trenne Vermutung und sichere Feststellung, senke bei fehlenden Angaben die confidence und nenne die Unsicherheit in message oder warnings. Erfinde niemals Teilenummern.
+- Für Teile und Flüssigkeiten bei fehlender FIN, PR-Code, Motorkennbuchstabe, Getriebe oder Altteil nicht erneut nachfragen. Stattdessen in specification oder note erklären, was vor dem Kauf abgeglichen werden muss. Preise als realistische deutsche Endkunden-Spannen in EUR; Teile und freie Werkstatt trennen.
 - Bei roter Öl-, Kühlmittel- oder Bremswarnung, Überhitzung, Kraftstoffgeruch, Brems-/Lenkungsverlust, Rauch/Brandgefahr oder metallischen Motorschlägen safetyLevel "stop" und keine Weiterfahrt.
 - Keine gefährlichen Anleitungen für Airbag, gespannte Federn, Hochdruck-Kraftstoffsystem, ungesichertes Arbeiten unter dem Auto oder Bremsen ohne Kompetenzhinweis.
 - Berücksichtige typische Themen des Audi A6 3.0 TDI wie Batterie/Lademanagement, Glühsystem, AGR, DPF, Ladedruck, Drallklappen, Injektorkorrekturwerte, Steuerkette, Thermostat, quattro und Tiptronic nur, wenn die Symptome dazu passen.
@@ -130,7 +132,7 @@ const DIAGNOSIS_SCHEMA = {
   properties: {
     kind: { enum: ["follow_up", "diagnosis"] },
     message: { type: "string" },
-    questions: { type: "array", items: { type: "string" }, maxItems: 4 },
+    questions: { type: "array", items: { type: "string" }, maxItems: 2 },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     safetyLevel: { enum: ["safe", "caution", "stop"] },
     safeToDrive: { type: ["boolean", "null"] },
@@ -225,7 +227,27 @@ function listOfText(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
-function normalizeReply(value: unknown): DiagnosticReply {
+function questionSignature(question: string): string[] {
+  const stopWords = new Set(["aber", "auch", "bitte", "dass", "dein", "deinem", "deinen", "deiner", "eine", "einem", "einen", "einer", "genau", "gibt", "hast", "oder", "schon", "sich", "sind", "tritt", "unter", "wann", "welche", "welcher", "welches", "wenn", "wurde", "zum"]);
+  return question
+    .toLocaleLowerCase("de-DE")
+    .replace(/[^a-zäöüß0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3 && !stopWords.has(word));
+}
+
+function isRepeatedQuestion(question: string, previousQuestions: string[]): boolean {
+  const current = new Set(questionSignature(question));
+  if (current.size === 0) return false;
+  return previousQuestions.some((previous) => {
+    const older = new Set(questionSignature(previous));
+    const intersection = [...current].filter((word) => older.has(word)).length;
+    const smaller = Math.min(current.size, older.size);
+    return smaller > 0 && intersection / smaller >= 0.6;
+  });
+}
+
+function normalizeReply(value: unknown, previousQuestions: string[] = []): DiagnosticReply {
   const source = recordOf(value);
   const costsSource = source.costs === null ? null : recordOf(source.costs);
   const kind = source.kind === "diagnosis" ? "diagnosis" : "follow_up";
@@ -290,7 +312,9 @@ function normalizeReply(value: unknown): DiagnosticReply {
   return {
     kind,
     message,
-    questions: listOfText(source.questions),
+    questions: listOfText(source.questions)
+      .filter((question, index, questions) => !isRepeatedQuestion(question, [...previousQuestions, ...questions.slice(0, index)]))
+      .slice(0, 2),
     confidence: Math.min(1, Math.max(0, numberOf(source.confidence))),
     safetyLevel,
     safeToDrive: typeof source.safeToDrive === "boolean" ? source.safeToDrive : null,
@@ -674,18 +698,36 @@ export default function Home() {
 
     try {
       const engine = await loadLocalAI();
+      const previousReplies = nextMessages
+        .map((message) => message.reply)
+        .filter((reply): reply is DiagnosticReply => Boolean(reply));
+      const previousQuestions = previousReplies.flatMap((reply) => reply.questions);
+      const hasFollowUpRound = previousReplies.some((reply) => reply.kind === "follow_up");
       const transcript = nextMessages.slice(-6).map((message) => {
         const questions = message.reply?.questions.length
           ? `\nRückfragen: ${message.reply.questions.join(" | ")}`
           : "";
         return `${message.role === "user" ? "FAHRER" : "A6 DIAG"}: ${message.text}${questions}`;
       }).join("\n\n");
+      const responseSchema = hasFollowUpRound
+        ? {
+            ...DIAGNOSIS_SCHEMA,
+            properties: {
+              ...DIAGNOSIS_SCHEMA.properties,
+              kind: { const: "diagnosis" },
+              questions: { type: "array", items: { type: "string" }, maxItems: 0 },
+            },
+          }
+        : DIAGNOSIS_SCHEMA;
+      const responseRule = hasFollowUpRound
+        ? "Es gab bereits eine Rückfragerunde. Antworte jetzt ZWINGEND mit kind diagnosis und questions []. Liefere die beste Arbeitsdiagnose aus den vorhandenen Angaben; Restunsicherheit senkt nur confidence."
+        : "Antworte möglichst direkt mit kind diagnosis. Nur wenn höchstens zwei unverzichtbare neue Angaben fehlen, ist genau eine Runde kind follow_up erlaubt.";
       const completion = await engine.chat.completions.create({
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           {
             role: "user",
-            content: `FAHRZEUGPROFIL\n${JSON.stringify(vehicle)}\n\nDIALOG\n${transcript}\n\nErstelle die nächste Antwort. Nutze bei fehlenden Angaben follow_up. Gib ausschließlich das verlangte JSON aus.`,
+            content: `FAHRZEUGPROFIL\n${JSON.stringify(vehicle)}\n\nBEREITS GESTELLTE FRAGEN\n${previousQuestions.length > 0 ? previousQuestions.join(" | ") : "keine"}\n\nDIALOG\n${transcript}\n\nVERBINDLICHE ANTWORTREGEL\n${responseRule}\nWiederhole keine Frage aus der Liste oder dem Dialog. Gib ausschließlich das verlangte JSON aus.`,
           },
         ],
         temperature: 0.1,
@@ -693,14 +735,14 @@ export default function Home() {
         max_tokens: 1000,
         response_format: {
           type: "json_object",
-          schema: JSON.stringify(DIAGNOSIS_SCHEMA),
+          schema: JSON.stringify(responseSchema),
         },
       });
       const content = completion.choices[0]?.message?.content;
       if (typeof content !== "string" || !content.trim()) {
         throw new Error("Das lokale Modell hat keine verwertbare Antwort geliefert.");
       }
-      const reply = normalizeReply(JSON.parse(content));
+      const reply = normalizeReply(JSON.parse(content), previousQuestions);
       setMessages((current) => [
         ...current,
         { id: crypto.randomUUID(), role: "assistant", text: reply.message, reply },
@@ -765,7 +807,7 @@ export default function Home() {
             <div>
               <span className="eyebrow">KI-Diagnose für deinen Audi</span>
               <h1>Was macht dein A6?</h1>
-              <p>Erst sauber eingrenzen, dann reparieren. Die KI fragt nach, bis eine belastbare Empfehlung möglich ist.</p>
+              <p>Schnell zur Lösung: Die KI antwortet möglichst direkt und stellt höchstens einmal zwei wirklich notwendige Rückfragen.</p>
             </div>
             <div className="technical-code">A6 · 3.0 TDI · 176 kW</div>
           </div>
@@ -879,7 +921,7 @@ export default function Home() {
           <section className="rail-card expertise-card">
             <div className="rail-title"><span>Werkstattlogik</span><b>AKTIV</b></div>
             <ul className="check-list">
-              <li><i>✓</i><span><strong>Keine Blinddiagnose</strong><small>Rückfragen bei fehlenden Daten</small></span></li>
+              <li><i>✓</i><span><strong>Schnelle Diagnose</strong><small>Maximal eine kurze Rückfragerunde</small></span></li>
               <li><i>✓</i><span><strong>A6-spezifisch</strong><small>3.0 TDI · 240 PS · 2011</small></span></li>
               <li><i>✓</i><span><strong>Kosten getrennt</strong><small>Selbsthilfe vs. Werkstatt</small></span></li>
               <li><i>✓</i><span><strong>Sicherheitsgrenze</strong><small>Stop-Empfehlung bei Risiko</small></span></li>
