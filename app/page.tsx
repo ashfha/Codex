@@ -72,14 +72,14 @@ type ModelStatus = "idle" | "loading" | "ready" | "error" | "unsupported";
 
 const LOCAL_MODELS = [
   {
-    id: "Qwen3.5-4B-q4f16_1-MLC",
-    label: "Standard · 4B",
-    description: "ca. 3,9 GB · für die meisten neueren PCs",
+    id: "Qwen3.5-2B-q4f16_1-MLC",
+    label: "Schnell · 2B",
+    description: "ca. 2,2 GB · deutlich schneller, gute Alltagsdiagnose",
   },
   {
-    id: "Qwen3.5-9B-q4f16_1-MLC",
-    label: "Pro · 9B",
-    description: "ca. 6,4 GB · bessere Antworten, starke GPU nötig",
+    id: "Qwen3.5-4B-q4f16_1-MLC",
+    label: "Präzise · 4B",
+    description: "ca. 3,9 GB · gründlicher, aber spürbar langsamer",
   },
 ] as const;
 
@@ -116,12 +116,13 @@ const quickStarters = [
 const SYSTEM_PROMPT = `Du bist A6 DIAG, ein sehr gewissenhafter deutscher Kfz-Meister und Diagnosetechniker mit Schwerpunkt Audi A6 und VAG-Diesel. Antworte ausschließlich auf Deutsch und arbeite wie eine gute Werkstatt: Symptome eingrenzen, kostenlose Prüfungen zuerst, dann Messungen und erst danach Teiletausch.
 
 Regeln:
-- Stelle 2 bis 5 gezielte Rückfragen, solange wichtige Angaben fehlen. Nutze dann kind "follow_up" und lasse Ursachen, Reparaturplan, Einkaufsliste und Kosten leer.
+- Stelle 2 bis 4 gezielte Rückfragen, solange wichtige Angaben fehlen. Nutze dann kind "follow_up" und lasse Ursachen, Reparaturplan, Einkaufsliste und Kosten leer.
 - Nutze kind "diagnosis" erst für eine belastbare Arbeitsdiagnose. Trenne Vermutung und sichere Feststellung, gib ehrliche Wahrscheinlichkeiten an und erfinde niemals Teilenummern.
 - Für Teile und Flüssigkeiten bei Unsicherheit FIN, PR-Code, Motorkennbuchstabe, Getriebe oder Altteil verlangen. Preise als realistische deutsche Endkunden-Spannen in EUR; Teile und freie Werkstatt trennen.
 - Bei roter Öl-, Kühlmittel- oder Bremswarnung, Überhitzung, Kraftstoffgeruch, Brems-/Lenkungsverlust, Rauch/Brandgefahr oder metallischen Motorschlägen safetyLevel "stop" und keine Weiterfahrt.
 - Keine gefährlichen Anleitungen für Airbag, gespannte Federn, Hochdruck-Kraftstoffsystem, ungesichertes Arbeiten unter dem Auto oder Bremsen ohne Kompetenzhinweis.
 - Berücksichtige typische Themen des Audi A6 3.0 TDI wie Batterie/Lademanagement, Glühsystem, AGR, DPF, Ladedruck, Drallklappen, Injektorkorrekturwerte, Steuerkette, Thermostat, quattro und Tiptronic nur, wenn die Symptome dazu passen.
+- Schreibe kompakt: Gründe höchstens ein Satz, Prüfschritte höchstens ein Satz und Reparaturanweisungen höchstens zwei kurze Sätze. Maximal vier Ursachen und sechs Reparaturschritte.
 - Antworte exakt als JSON gemäß dem vorgegebenen Schema. Kein Markdown außerhalb des JSON.`;
 
 const DIAGNOSIS_SCHEMA = {
@@ -129,28 +130,28 @@ const DIAGNOSIS_SCHEMA = {
   properties: {
     kind: { enum: ["follow_up", "diagnosis"] },
     message: { type: "string" },
-    questions: { type: "array", items: { type: "string" }, maxItems: 5 },
+    questions: { type: "array", items: { type: "string" }, maxItems: 4 },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     safetyLevel: { enum: ["safe", "caution", "stop"] },
     safeToDrive: { type: ["boolean", "null"] },
     summary: { type: "string" },
     likelyCauses: {
       type: "array",
-      maxItems: 5,
+      maxItems: 4,
       items: {
         type: "object",
         properties: {
           name: { type: "string" },
           probability: { type: "number", minimum: 0, maximum: 1 },
           reason: { type: "string" },
-          checks: { type: "array", items: { type: "string" }, maxItems: 5 },
+          checks: { type: "array", items: { type: "string" }, maxItems: 3 },
         },
         required: ["name", "probability", "reason", "checks"],
       },
     },
     repairPlan: {
       type: "array",
-      maxItems: 8,
+      maxItems: 6,
       items: {
         type: "object",
         properties: {
@@ -166,7 +167,7 @@ const DIAGNOSIS_SCHEMA = {
     },
     shoppingList: {
       type: "array",
-      maxItems: 10,
+      maxItems: 8,
       items: {
         type: "object",
         properties: {
@@ -547,7 +548,7 @@ export default function Home() {
     const restoreTimer = window.setTimeout(() => {
       const storedVehicle = window.localStorage.getItem("a6-diagnose-vehicle");
       const storedMessages = window.localStorage.getItem("a6-diagnose-messages");
-      const storedModel = window.localStorage.getItem("a6-diagnose-model");
+      const storedModel = window.localStorage.getItem("a6-diagnose-model-v2");
       if (storedVehicle) {
         try { setVehicle({ ...DEFAULT_VEHICLE, ...JSON.parse(storedVehicle) }); } catch { /* keep defaults */ }
       }
@@ -618,7 +619,7 @@ export default function Home() {
       setModelStatus("loading");
       setModelProgress(0);
       setModelProgressText("Modell wird vorbereitet …");
-      window.localStorage.setItem("a6-diagnose-model", modelId);
+      window.localStorage.setItem("a6-diagnose-model-v2", modelId);
 
       const worker = new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" });
       workerRef.current = worker;
@@ -673,7 +674,7 @@ export default function Home() {
 
     try {
       const engine = await loadLocalAI();
-      const transcript = nextMessages.slice(-8).map((message) => {
+      const transcript = nextMessages.slice(-6).map((message) => {
         const questions = message.reply?.questions.length
           ? `\nRückfragen: ${message.reply.questions.join(" | ")}`
           : "";
@@ -687,9 +688,9 @@ export default function Home() {
             content: `FAHRZEUGPROFIL\n${JSON.stringify(vehicle)}\n\nDIALOG\n${transcript}\n\nErstelle die nächste Antwort. Nutze bei fehlenden Angaben follow_up. Gib ausschließlich das verlangte JSON aus.`,
           },
         ],
-        temperature: 0.2,
-        top_p: 0.85,
-        max_tokens: 1500,
+        temperature: 0.1,
+        top_p: 0.8,
+        max_tokens: 1000,
         response_format: {
           type: "json_object",
           schema: JSON.stringify(DIAGNOSIS_SCHEMA),
@@ -855,7 +856,7 @@ export default function Home() {
                     disabled={modelStatus === "loading"}
                     onChange={(event) => {
                       setModelId(event.target.value);
-                      window.localStorage.setItem("a6-diagnose-model", event.target.value);
+                      window.localStorage.setItem("a6-diagnose-model-v2", event.target.value);
                     }}
                   >
                     {LOCAL_MODELS.map((model) => (
