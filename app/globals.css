@@ -182,6 +182,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .readiness-card.needs-key .readiness-icon span { border-color: var(--amber); }
 .readiness-card h2 { margin: 10px 0 8px; font-size: 17px; letter-spacing: -.025em; }
 .readiness-card p { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0 0 16px; }
+.local-model-controls { display: grid; gap: 11px; padding-top: 2px; }
+.local-model-controls label { display: grid; gap: 7px; }
+.local-model-controls label > span { color: #727b86; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.local-model-controls select {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  background: #090c0f;
+  color: var(--silver);
+  padding: 10px;
+  outline: none;
+  font-size: 11px;
+}
+.local-model-controls select:focus { border-color: rgba(228,29,45,.55); }
+.local-model-controls select:disabled { opacity: .55; }
+.local-model-controls small { color: #6f7883; font-size: 9px; line-height: 1.45; }
+.model-progress { height: 4px; background: rgba(255,255,255,.07); overflow: hidden; }
+.model-progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--red), #ff6b78); transition: width 220ms ease; }
+.progress-copy { min-height: 26px; word-break: break-word; }
 .check-list { list-style: none; padding: 14px 0 0; margin: 0; display: grid; gap: 13px; }
 .check-list li { display: flex; gap: 10px; }
 .check-list i { font-style: normal; color: var(--green); font-size: 10px; width: 17px; height: 17px; display: grid; place-items: center; border: 1px solid rgba(87,209,144,.25); }
