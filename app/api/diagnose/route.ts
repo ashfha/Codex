@@ -102,6 +102,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "Die übermittelten Fahrzeug- oder Problemdaten sind unvollständig." }, { status: 400 });
     }
     const message = error instanceof Error ? error.message : "Unbekannter Fehler";
+    console.error("A6 DIAG generation failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message,
+    });
     const authenticationError = /auth|oidc|unauth|forbidden|401|403/i.test(message);
     return Response.json(
       {
