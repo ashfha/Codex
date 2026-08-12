@@ -315,6 +315,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const [vehicleOpen, setVehicleOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -355,6 +356,7 @@ export default function Home() {
     setMessages([INITIAL_MESSAGE]);
     setInput("");
     setError("");
+    setErrorCode("");
     window.localStorage.removeItem("a6-diagnose-messages");
   }
 
@@ -372,6 +374,7 @@ export default function Home() {
     setMessages(nextMessages);
     setInput("");
     setError("");
+    setErrorCode("");
     setIsLoading(true);
 
     try {
@@ -386,6 +389,7 @@ export default function Home() {
 
       const data = await response.json();
       if (!response.ok) {
+        setErrorCode(typeof data.code === "string" ? data.code : "");
         throw new Error(data.error || "Die Diagnose konnte gerade nicht erstellt werden.");
       }
 
@@ -487,7 +491,12 @@ export default function Home() {
             <div ref={messagesEndRef} />
           </div>
 
-          {error && <div className="error-banner"><strong>Verbindung fehlgeschlagen</strong><span>{error}</span></div>}
+          {error && (
+            <div className="error-banner">
+              <strong>{errorCode === "BILLING_REQUIRED" ? "Einmalige Freischaltung nötig" : "Verbindung fehlgeschlagen"}</strong>
+              <span>{error}</span>
+            </div>
+          )}
 
           <form className="composer" onSubmit={submitProblem}>
             <textarea
