@@ -14,9 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Audi Diagnose Pro",
-  description: "KI-gestützte Fahrzeugdiagnose für den Audi A6 3.0 TDI mit Reparaturplan, Einkaufsliste und Kostenschätzung.",
-  other: { "codex-preview": "development" },
-  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+  description: "Lokale KI-Fahrzeugdiagnose für den Audi A6 3.0 TDI mit Reparaturplan, Einkaufsliste und Kostenschätzung.",
+  icons: { icon: "favicon.svg", shortcut: "favicon.svg" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
