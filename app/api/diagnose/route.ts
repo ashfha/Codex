@@ -106,13 +106,18 @@ export async function POST(request: Request) {
       name: error instanceof Error ? error.name : "UnknownError",
       message,
     });
+    const billingRequired = /valid credit card|add a card|free credits|payment required|\b402\b/i.test(message);
     const authenticationError = /auth|oidc|unauth|forbidden|401|403/i.test(message);
     return Response.json(
       {
-        code: authenticationError ? "AI_NOT_CONFIGURED" : "DIAGNOSIS_FAILED",
-        error: authenticationError ? "Die automatische KI-Verbindung ist gerade nicht verfügbar." : "Die KI-Diagnose konnte gerade nicht abgeschlossen werden. Bitte versuche es erneut.",
+        code: billingRequired ? "BILLING_REQUIRED" : authenticationError ? "AI_NOT_CONFIGURED" : "DIAGNOSIS_FAILED",
+        error: billingRequired
+          ? "Vercel verlangt einmalig eine hinterlegte Zahlungsmethode, bevor die kostenlosen AI-Gateway-Credits freigeschaltet werden. Ein API-Schlüssel ist nicht erforderlich."
+          : authenticationError
+            ? "Die automatische KI-Verbindung ist gerade nicht verfügbar."
+            : "Die KI-Diagnose konnte gerade nicht abgeschlossen werden. Bitte versuche es erneut.",
       },
-      { status: authenticationError ? 503 : 500 },
+      { status: billingRequired ? 402 : authenticationError ? 503 : 500 },
     );
   }
 }
